@@ -1,69 +1,59 @@
-import Image from "next/image";
-import styles from "./page.module.css";
+"use client";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-export default function Home() {
-  return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>
-            To get started, edit the{" "}
-            <code className={styles.code}>page.tsx</code> file.
-          </h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
-  );
+type Place = { name: string; address: string; lat: number; lng: number };
+type Station = { id: string; name: string; lat: number; lng: number; availableBikes: number | null; distance?: number };
+type RouteMode = "BIKE_ONLY" | "SHORTEST";
+type RouteData = { distanceMeters: number; durationSeconds: number; points: [number, number][] };
+type RouteResults = Record<RouteMode, { data?: RouteData; error?: string }>;
+type Accident = { id:string; name:string; district:string; lat:number; lng:number; count:number; casualties:number | null; year:number };
+type Weather = { baseDate:string; baseTime:string; fcstDate:string; fcstTime:string; temperatureC:number; precipitationProbability:number; precipitationType:string };
+function forecastTime(date:string,time:string){return date.slice(0,4)+"."+date.slice(4,6)+"."+date.slice(6,8)+" "+time.slice(0,2)+":"+time.slice(2,4);}
+const rainTypes:Record<string,string>={"0":"없음","1":"비","2":"비/눈","3":"눈","4":"소나기"};
+type MapInstance = object;
+function routeDistance(a: Accident, points: [number, number][]) {
+ const radians=Math.PI/180, scaleX=111320*Math.cos(a.lat*radians), scaleY=111320; let min=Infinity;
+ for(let i=1;i<points.length;i++){const x1=(points[i-1][0]-a.lng)*scaleX,y1=(points[i-1][1]-a.lat)*scaleY,x2=(points[i][0]-a.lng)*scaleX,y2=(points[i][1]-a.lat)*scaleY,dx=x2-x1,dy=y2-y1;const d=dx*dx+dy*dy,t=d===0?0:Math.max(0,Math.min(1,-(x1*dx+y1*dy)/d));min=Math.min(min,Math.hypot(x1+t*dx,y1+t*dy));}return min;
+}
+function distanceMeters(a: Place, b: Station) { const rad = Math.PI / 180; const dLat = (b.lat-a.lat)*rad, dLng = (b.lng-a.lng)*rad; const h = Math.sin(dLat/2)**2 + Math.cos(a.lat*rad)*Math.cos(b.lat*rad)*Math.sin(dLng/2)**2; return 12742000 * Math.asin(Math.min(1, Math.sqrt(h))); }
+function distanceText(m: number) { return m < 1000 ? `${Math.round(m)}m` : `${(m/1000).toFixed(1)}km`; }
+declare global { interface Window { kakao?: { maps: { load: (cb: () => void) => void; LatLng: new (a: number, b: number) => object; Map: new (el: HTMLElement, opts: object) => MapInstance; Marker: new (opts: object) => object; CustomOverlay: new (opts: object) => object; Polyline: new (opts: object) => { setMap: (map: MapInstance) => void } } } } }
+const places: Place[] = [
+ {name:"여의나루역",address:"영등포구 여의동로 343",lat:37.5271,lng:126.9329},
+ {name:"반포한강공원",address:"서초구 신반포로11길 40",lat:37.5109,lng:126.9958},
+ {name:"마포대교",address:"마포구 마포동",lat:37.5331,lng:126.9407},
+ {name:"한강대교",address:"용산구 이촌동",lat:37.5175,lng:126.9587},
+ {name:"서울숲",address:"성동구 뚝섬로 273",lat:37.5445,lng:127.0374},
+];
+function Icon({name,size=20}:{name:string;size?:number}) { const paths:Record<string,React.ReactNode> = {
+ bike:<><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="18.5" cy="17.5" r="3.5"/><path d="m5.5 17.5 4-8 4 8H5.5l4-8h4l5 8M14 6h2"/></>,
+ search:<><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></>,
+ pin:<><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></>,
+ sun:<><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M19 5l-1.5 1.5m-11 11L5 19"/></>,
+ alert:<><path d="M12 3 2.5 20h19L12 3Z"/><path d="M12 9v4m0 3h.01"/></>,
+ swap:<path d="M7 4v15m0 0-3-3m3 3 3-3M17 20V5m0 0-3 3m3-3 3 3"/>,
+ nav:<path d="m12 3 8 18-8-4-8 4 8-18Z"/>,
+ }; return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>; }
+function MapView({start,end,showStations,stations,route,accidents,onAccident}:{start:Place;end:Place;showStations:boolean;stations:Station[];route:RouteData | null;accidents:Accident[];onAccident:(accident:Accident)=>void}) {
+ const ref=useRef<HTMLDivElement>(null); const [status,setStatus]=useState("loading");
+ useEffect(()=>{ const key=process.env.NEXT_PUBLIC_KAKAO_JS_KEY; if(!key){return;} let cancelled=false;
+ const init=()=>window.kakao?.maps.load(()=>{if(cancelled||!ref.current||!window.kakao)return; try {const m=window.kakao.maps; const point=(lat:number,lng:number)=>new m.LatLng(lat,lng); const map=new m.Map(ref.current,{center:point(start.lat,start.lng),level:6}); [start,end].forEach(p=>new m.Marker({map,position:point(p.lat,p.lng),title:p.name})); if(showStations) stations.slice(0, 30).forEach(station=>{ const content=document.createElement("div"); content.className="station-overlay"; content.textContent=station.availableBikes === null ? "대수 미상" : `${station.availableBikes}대`; content.title=station.name; content.setAttribute("aria-label", `${station.name} ${content.textContent}`); new m.CustomOverlay({map,position:point(station.lat,station.lng),content,yAnchor:1.1}); }); accidents.forEach(accident=>{const content=document.createElement("button");content.type="button";content.className="accident-overlay";content.textContent="!";content.title=`${accident.name} · ${accident.year}년 사고 ${accident.count}건`;content.setAttribute("aria-label",content.title);content.addEventListener("click",()=>onAccident(accident));new m.CustomOverlay({map,position:point(accident.lat,accident.lng),content,yAnchor:1});}); if(route) new m.Polyline({path:route.points.map(([lng,lat])=>point(lat,lng)),strokeWeight:5,strokeColor:"#ff1493",strokeOpacity:.9,strokeStyle:"solid"}).setMap(map); setStatus("ready");}catch{setStatus("error");}});
+ if(window.kakao?.maps)init(); else {let script=document.querySelector<HTMLScriptElement>("script[data-kakao-sdk]"); if(!script){script=document.createElement("script");script.dataset.kakaoSdk="true";script.src=`https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(key)}&autoload=false`;document.head.appendChild(script);} script.addEventListener("load",init);script.addEventListener("error",()=>setStatus("error"));} return()=>{cancelled=true;}; },[start,end,showStations,stations,route,accidents,onAccident]);
+ const ready=!!process.env.NEXT_PUBLIC_KAKAO_JS_KEY && status==="ready";
+ return <div className="map-area"><div ref={ref} className="map-canvas" aria-label="자전거 경로 지도"/>{!ready&&<div className="demo-map" aria-label="예시 지도"><div className="park park-one"/><div className="park park-two"/><div className="river"/><div className="river-label">한 강 <span>HANGANG RIVER</span></div><div className="road road-one"/><div className="road road-two"/><div className="road road-three"/><div className="bridge bridge-one"/><div className="bridge bridge-two"/><span className="district d1">마포구</span><span className="district d2">용산구</span><span className="district d3">여의도동</span><span className="district d4">동작구</span><span className="map-label l1">여의도한강공원</span><span className="map-label l2">이촌한강공원</span><span className="map-label l3">노들섬</span></div>}<div className="map-top"><span className="map-badge"><i/> {ready?"카카오맵":"예시 지도"}</span><span className="map-note">대여소와 경로는 실제 조회 정보입니다</span></div><div className="map-legend"><span><i className="legend-route"/> 자전거 경로</span><span><i className="legend-station"><Icon name="bike" size={13}/></i> 따릉이 대여소</span><span><i className="accident-key">!</i> 과거 사고다발지역</span></div>{!ready&&<div className="map-disclaimer">{status==="error"?"카카오맵을 불러오지 못했어요. 키와 도메인 설정을 확인해 주세요.":process.env.NEXT_PUBLIC_KAKAO_JS_KEY?"카카오맵을 불러오는 중입니다.":"카카오맵 API 키를 설정하면 실제 지도가 표시됩니다."}</div>}</div>;
+}
+export default function Home(){const [start,setStart]=useState(places[0]);const [end,setEnd]=useState(places[1]);const [queries,setQueries]=useState([places[0].name,places[1].name]);const [active,setActive]=useState<number|null>(null);const [showStations,setShowStations]=useState(true);const [message,setMessage]=useState(""); const [weather,setWeather]=useState<Weather | null>(null); const [weatherState,setWeatherState]=useState<"loading" | "ready" | "error" | "empty">("loading"); const [weatherRetry,setWeatherRetry]=useState(0); const [accidents,setAccidents]=useState<Accident[]>([]); const [accidentYear,setAccidentYear]=useState<number | null>(null); const [accidentState,setAccidentState]=useState<"loading" | "ready" | "error">("loading"); const [accidentRetry,setAccidentRetry]=useState(0); const [selectedAccident,setSelectedAccident]=useState<Accident | null>(null); const [selectedStation,setSelectedStation]=useState<Station | null>(null); const [routeFetchedAt,setRouteFetchedAt]=useState(""); const [routeMode,setRouteMode]=useState<RouteMode>("BIKE_ONLY"); const [routes,setRoutes]=useState<RouteResults | null>(null); const [routeState,setRouteState]=useState<"idle" | "loading" | "ready" | "error">("idle"); const [routeRetry,setRouteRetry]=useState(0); const [stations,setStations]=useState<Station[]>([]); const [stationState,setStationState]=useState("loading"); const [fetchedAt,setFetchedAt]=useState(""); const [refresh,setRefresh]=useState(0);
+ useEffect(()=>{ const controller=new AbortController(); fetch("/api/stations",{cache:"no-store",signal:controller.signal}).then(async response=>{if(!response.ok) throw new Error("failed"); return response.json();}).then(result=>{if(!Array.isArray(result.data)) throw new Error("invalid"); setStations(result.data); setFetchedAt(result.fetchedAt); setStationState("ready");}).catch(()=>{if(!controller.signal.aborted){setStations([]);setStationState("error");}}); return ()=>controller.abort(); },[refresh]);
+ const nearby=useMemo(()=>stations.map(station=>({...station,distance:distanceMeters(start,station)})).sort((a,b)=>a.distance-b.distance),[stations,start]);
+ useEffect(()=>{ if(!selectedStation) return; const controller=new AbortController(); fetch("/api/routes",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({start:{lat:selectedStation.lat,lng:selectedStation.lng},end:{lat:end.lat,lng:end.lng}}),signal:controller.signal}).then(async response=>{if(!response.ok) throw new Error("request_failed"); return response.json();}).then(result=>{if(!result.routes?.BIKE_ONLY || !result.routes?.SHORTEST) throw new Error("invalid"); setRoutes(result.routes);setRouteFetchedAt(result.fetchedAt);setRouteState("ready");}).catch(()=>{if(!controller.signal.aborted){setRoutes(null);setRouteState("error");}}); return ()=>controller.abort(); },[selectedStation,end,routeRetry]);
+ const chooseStation=(station:Station)=>{if(station.lat !== (selectedStation?.lat ?? start.lat) || station.lng !== (selectedStation?.lng ?? start.lng)){setWeather(null);setWeatherState("loading");}setRoutes(null);setRouteState("loading");if(selectedStation===station){setRouteRetry(v=>v+1);}else{setSelectedStation(station);}};
+ const retryRoute=()=>{setRoutes(null);setRouteState("loading");setRouteRetry(v=>v+1);};
+ const activeRoute=routeState === "ready" ? routes?.[routeMode]?.data ?? null : null;
+ useEffect(()=>{const controller=new AbortController();fetch("/api/accidents",{cache:"no-store",signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error("failed");return response.json();}).then(result=>{if(!Array.isArray(result.data))throw new Error("invalid");setAccidents(result.data);setAccidentYear(result.year);setAccidentState("ready");}).catch(()=>{if(!controller.signal.aborted){setAccidents([]);setAccidentState("error");}});return ()=>controller.abort();},[accidentRetry]);
+ const nearbyAccidents=useMemo(()=>activeRoute ? accidents.map(accident=>({...accident,distance:routeDistance(accident,activeRoute.points)})).filter(accident=>accident.distance<=200).sort((a,b)=>a.distance-b.distance) : [],[accidents,activeRoute]);
+ const mapStart=selectedStation ? {name:selectedStation.name,address:"따릉이 대여소",lat:selectedStation.lat,lng:selectedStation.lng} : start;
+ const weatherLat=mapStart.lat, weatherLng=mapStart.lng;
+ useEffect(()=>{const controller=new AbortController();fetch("/api/weather?"+new URLSearchParams({lat:String(weatherLat),lng:String(weatherLng)}),{cache:"no-store",signal:controller.signal}).then(async response=>{if(response.status===404){setWeatherState("empty");return null;}if(!response.ok)throw new Error("failed");return response.json();}).then(result=>{if(result){setWeather(result);setWeatherState("ready");}}).catch(()=>{if(!controller.signal.aborted){setWeather(null);setWeatherState("error");}});return ()=>controller.abort();},[weatherLat,weatherLng,weatherRetry]);
+ const select=(p:Place,i:number)=>{if(i===0){if(p.lat !== (selectedStation?.lat ?? start.lat) || p.lng !== (selectedStation?.lng ?? start.lng)){setWeather(null);setWeatherState("loading");}setStart(p);setSelectedStation(null);setRoutes(null);setRouteState("idle");}else{if(selectedStation && (p.lat !== end.lat || p.lng !== end.lng)){setRoutes(null);setRouteState("loading");}setEnd(p);}setQueries(q=>q.map((v,n)=>n===i?p.name:v));setActive(null);setMessage("선택한 예시 장소를 표시했어요.");};
+ return <div className="app-shell"><header className="header"><div className="brand"><span className="brand-icon"><Icon name="bike" size={23}/></span><span>safe bike <b>seoul</b></span></div><div className="header-right"><span className="header-caption">서울을 더 안전하게, 두 바퀴로</span><span className="demo-pill">DEMO</span></div></header><div className="workspace"><aside className="sidebar"><div className="intro"><div className="eyebrow"><span/> SEOUL BIKE GUIDE</div><h1>어디로 달려볼까요?</h1><p>안전하고 기분 좋은 라이딩을 시작해요.</p></div><section className="search-card"><div className="section-heading"><div><span className="section-kicker">나의 라이딩</span><h2>경로 검색</h2></div><span className="small-icon"><Icon name="nav" size={18}/></span></div><p className="search-example">장소 검색은 현재 제공된 예시 장소 5곳에서만 가능합니다.</p><div className="search-fields">{[0,1].map(i=><div className="field-wrap" key={i}><div className="input-row"><span className={i===0?"point start-point":"point end-point"}/><label className="sr-only" htmlFor={`place-${i}`}>{i===0?"출발지":"목적지"}</label><input id={`place-${i}`} value={queries[i]} placeholder={i===0?"출발지 검색":"목적지 검색"} onFocus={()=>setActive(i)} onChange={e=>{const value=e.target.value;setQueries(q=>q.map((v,n)=>n===i?value:v));setActive(i);}}/><Icon name="search" size={18}/></div>{active===i&&<div className="suggestions">{places.filter(p=>p.name.includes(queries[i].trim())||p.address.includes(queries[i].trim())).map(p=><button key={p.name} onClick={()=>select(p,i)}><Icon name="pin" size={16}/><span><strong>{p.name}</strong><small>{p.address}</small></span></button>)}<div className="suggestion-note">예시 장소에서 검색할 수 있어요</div></div>}</div>)}<button className="swap" aria-label="출발지와 목적지 바꾸기" onClick={()=>{if(end.lat !== (selectedStation?.lat ?? start.lat) || end.lng !== (selectedStation?.lng ?? start.lng)){setWeather(null);setWeatherState("loading");}setStart(end);setEnd(start);setSelectedStation(null);setRoutes(null);setRouteState("idle");setQueries([end.name,start.name]);setActive(null);}}><Icon name="swap" size={16}/></button></div><button className="primary-button" onClick={()=>{setActive(null);setMessage("목록에서 선택한 예시 장소를 기준으로 표시합니다.");}}><Icon name="search" size={18}/> 경로 찾아보기</button>{message&&<p className="action-message" role="status">{message}</p>}</section><section className="route-section"><div className="section-title"><div><span className="section-kicker">카카오맵 자전거 길찾기</span><h2>대여소에서 목적지까지</h2></div></div><div className="route-card"><div className="route-card-top"><span className="route-icon"><Icon name="bike" size={19}/></span><div><strong>{selectedStation ? selectedStation.name : "대여소를 선택해 주세요"}</strong><p>{selectedStation ? "목적지: " + end.name : "아래 목록에서 출발할 대여소를 선택하세요."}</p></div></div>{selectedStation && <>{routeState === "loading" ? <p className="route-status" role="status">실제 경로를 조회하고 있습니다.</p> : routeState === "error" ? <p className="route-status" role="alert">경로를 불러오지 못했습니다. <button className="retry" onClick={retryRoute}>다시 시도</button></p> : routeState === "ready" && <><div className="comparison-grid" aria-label="두 자전거 경로 비교">{([ ["BIKE_ONLY","자전거도로 우선"], ["SHORTEST","최단 경로"] ] as const).map(([mode,label])=>{const route=routes?.[mode]?.data;const incidentLabel=accidentState === "error" ? "조회 실패" : accidentState === "loading" ? "조회 중" : accidents.length === 0 ? "정보 없음" : route ? accidents.filter(a=>routeDistance(a,route.points)<=200).length+"곳" : "정보 없음";return <div className={routeMode===mode ? "comparison-card active" : "comparison-card"} key={mode}><button type="button" className="comparison-select" aria-pressed={routeMode===mode} onClick={()=>setRouteMode(mode)}><strong>{label}</strong><span>{routeMode===mode?"지도에 표시 중":"지도에서 보기"}</span></button>{route ? <dl><div><dt>이동거리</dt><dd>{(route.distanceMeters/1000).toFixed(1)} km</dd></div><div><dt>예상 시간</dt><dd>약 {Math.ceil(route.durationSeconds/60)}분</dd></div><div><dt>사고다발지역</dt><dd>{incidentLabel}</dd></div></dl> : <p className="comparison-error">경로 조회 실패</p>}</div>})}</div><p className="comparison-note">사고다발지역은 경로 중심선 200m 이내의 과거 통계입니다. 건수가 적어도 안전을 보장하지 않습니다.</p><p className="comparison-source">경로: 카카오맵 · 조회 {routeFetchedAt ? new Date(routeFetchedAt).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"}) : "시각 정보 없음"}{accidentYear ? " · 사고 기준 " + accidentYear + "년" : ""}</p>{(!routes?.BIKE_ONLY?.data || !routes?.SHORTEST?.data) && <button className="retry route-retry" onClick={retryRoute}>경로 다시 조회</button>}</>}</>}</div></section><section className="station-section"><div className="section-title"><div><span className="section-kicker">주변 시설</span><h2>따릉이 대여소</h2></div><label className="toggle"><input type="checkbox" checked={showStations} onChange={e=>setShowStations(e.target.checked)}/><span/><span className="sr-only">대여소 표시</span></label></div><p className="section-copy">출발지 기준 가까운 순 · 직선거리</p><div className="station-list" aria-live="polite">{stationState === "loading" ? <p className="station-status">대여소 정보를 불러오는 중입니다.</p> : stationState === "error" ? <p className="station-status">대여소 정보를 불러오지 못했습니다. <button className="retry" onClick={()=>{setStationState("loading");setRefresh(v=>v+1);}}>다시 시도</button></p> : nearby.length === 0 ? <p className="station-status">표시할 대여소가 없습니다.</p> : nearby.slice(0,5).map(station=><button type="button" className="station-row station-select" key={station.id} aria-pressed={selectedStation?.id===station.id} onClick={()=>chooseStation(station)}><span className="station-icon"><Icon name="bike" size={17}/></span><div><strong>{station.name}</strong><small>출발지에서 {distanceText(station.distance)}</small></div><span className="availability">{station.availableBikes === null ? "대수 미상" : `${station.availableBikes}대`}</span></button>)}</div>{stationState === "ready" && <p className="station-updated">서울 열린데이터광장 · 조회 {new Date(fetchedAt).toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})} <button className="retry" onClick={()=>{setStationState("loading");setRefresh(v=>v+1);}}>새로고침</button></p>}</section><div className="sidebar-footer">대여소 정보: 서울 열린데이터광장 · 경로: 카카오맵 · 날씨는 기상청 단기예보입니다.</div></aside><main className="main"><div className="map-header"><div><h2>라이딩 지도</h2><p>서울의 풍경을 따라, 나만의 경로를 찾아보세요.</p></div><div className="map-header-right"><span>서울특별시</span><span className="map-header-divider"/><span>기상청 단기예보</span></div></div><div className="map-wrap"><MapView start={mapStart} end={end} showStations={showStations} stations={nearby} route={activeRoute} accidents={accidents} onAccident={setSelectedAccident}/></div><div className="insights"><article className="insight-card weather"><div className="insight-top"><span className="insight-icon weather-icon"><Icon name="sun" size={21}/></span><span className="sample-tag">단기예보</span></div><div className="insight-content"><div><span className="insight-label">기상청 단기예보 · 출발지 기준</span><h3>{mapStart.name}</h3><p>실시간 관측값이 아닌 예보입니다.</p></div>{weatherState === "ready" && weather && <div className="temperature">{weather.temperatureC}<span>°C</span></div>}</div>{weatherState === "loading" ? <p className="weather-status" role="status">예보를 불러오는 중입니다.</p> : weatherState === "empty" ? <p className="weather-status">조회 가능한 예보 데이터가 없습니다.</p> : weatherState === "error" ? <p className="weather-status" role="alert">예보를 불러오지 못했습니다. <button className="retry" onClick={()=>{setWeatherState("loading");setWeatherRetry(v=>v+1);}}>다시 시도</button></p> : weather && <><div className="insight-footer"><span>강수확률 <b>{weather.precipitationProbability}%</b></span><span>강수형태 <b>{rainTypes[weather.precipitationType]}</b></span></div><div className="forecast-times"><span>발표시각 {forecastTime(weather.baseDate,weather.baseTime)}</span><span>예보 대상시각 {forecastTime(weather.fcstDate,weather.fcstTime)}</span></div></>}</article><article className="insight-card accident"><div className="insight-top"><span className="insight-icon accident-icon"><Icon name="alert" size={21}/></span><span className="sample-tag">{accidentYear ? accidentYear+"년 기준" : "과거 통계"}</span></div><div className="insight-content"><div><span className="insight-label">한국도로교통공단 사고다발지역</span><h3>선택 경로 주변 사고정보</h3><p>경로 중심선에서 200m 이내 · 직선거리</p></div></div>{accidentState === "loading" ? <p className="accident-message" role="status">사고정보를 불러오는 중입니다.</p> : accidentState === "error" ? <p className="accident-message" role="alert">사고정보를 불러오지 못했습니다. <button className="retry" onClick={()=>{setAccidentState("loading");setAccidentRetry(v=>v+1);}}>다시 시도</button></p> : accidents.length===0 ? <p className="accident-message">제공된 사고다발지역 데이터가 없습니다.</p> : !activeRoute ? <p className="accident-message">대여소와 경로를 선택하면 주변 지역을 확인할 수 있습니다.</p> : nearbyAccidents.length===0 ? <p className="accident-message">선택 경로 200m 이내에 조회된 사고다발지역이 없습니다.</p> : <div className="accident-list">{nearbyAccidents.map(item=><button key={item.id} onClick={()=>setSelectedAccident(item)}>{item.name} · {item.count}건 · 약 {Math.round(item.distance)}m</button>)}</div>}{selectedAccident && <div className="accident-detail"><button className="detail-close" aria-label="사고정보 닫기" onClick={()=>setSelectedAccident(null)}>×</button><strong>{selectedAccident.name}</strong><p>{selectedAccident.year}년 기준 · 사고 {selectedAccident.count}건{selectedAccident.casualties !== null ? (" · 사상자 " + selectedAccident.casualties + "명") : ""}</p></div>}<div className="insight-footer accident-warning">과거 통계이며 실제 경로의 안전을 보장하거나 위험도를 확정하지 않습니다.</div><p className="accident-source">출처: <a href="https://opendata.koroad.or.kr/api/selectBicycleDataSet.do" target="_blank" rel="noreferrer">한국도로교통공단 교통사고분석시스템</a></p></article></div><div className="bottom-note"><span>ⓘ</span> 대여소 정보는 서울시, 경로는 카카오맵에서 제공합니다. 사고정보는 과거 통계이며 날씨는 실시간 관측값이 아닌 단기예보입니다.</div></main></div></div>;
 }
